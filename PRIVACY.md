@@ -2,7 +2,7 @@
 
 Revision date: November 6, 2026
 
-Redthread is a skills-only plugin. It does not operate an external server, create user accounts, or independently collect, store, sell, or share personal data.
+Redthread is a portable Agent Skill. It does not operate an external server, create user accounts, or independently collect, store, sell, or share personal data.
 
 The workflow sends the photos, paper references, and prompts needed for generation to the user's configured Seedream 5.0 Pro service. If optional external segmentation is used, that service receives the photo needed to extract the subject. These services process data under their own terms and privacy policies.
 

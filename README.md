@@ -1,6 +1,6 @@
 # Redthread
 
-Redthread 是一个兼容 Agent Skills 标准的图像创作 Skill，可用于 Codex 及其他支持 `SKILL.md` 的 Agent。本修订版使用 **Seedream 5.0 Pro**，把单张人物照片制作成 3:4 竖版红线双场景拼贴：上半部分保留原始环境，并将人物变成暖白色发光剪影；下半部分将同一人物置于源图主题色的纤维纸背景上，再加入英日双语手写文字与酒红色彩铅红线。
+Redthread 是一个兼容 Agent Skills 标准的图像创作 Skill，可用于支持 `SKILL.md` 的 Agent。本修订版使用 **Seedream 5.0 Pro**，把单张人物照片制作成 3:4 竖版红线双场景拼贴：上半部分保留原始环境，并将人物变成暖白色发光剪影；下半部分将同一人物置于源图主题色的纤维纸背景上，再加入英日双语手写文字与酒红色彩铅红线。
 
 这是基于 [HuHana77/redthread](https://github.com/HuHana77/redthread) 制作的 **1.2.0 Seedream 修订版**，由 [guangyuniu8023-arch/redthread](https://github.com/guangyuniu8023-arch/redthread) 发布。原作者署名和素材许可证保持不变。安装本版请使用本仓库链接。
 
@@ -23,28 +23,28 @@ Redthread 是一个兼容 Agent Skills 标准的图像创作 Skill，可用于 C
 https://github.com/guangyuniu8023-arch/redthread/tree/main/skills/redthread
 ```
 
-也可以克隆后手动安装。若已有同名 Skill，先将旧目录移到安装目录之外备份，避免遗留脚本混入新版。
+也可以克隆后手动加载：
 
 ```bash
 git clone https://github.com/guangyuniu8023-arch/redthread.git
-mkdir -p ~/.codex/skills
-cp -R redthread/skills/redthread ~/.codex/skills/
 ```
 
-安装完成后，新开一个 Codex 任务。若 Skill 未出现，再重启 Codex。
+将 `redthread/skills/redthread/` 整个目录导入所用工具的 Skill 目录，或让 Agent 读取其中的 `SKILL.md`。保留 `references/` 和 `assets/` 的相对路径。若已有同名 Skill，先将旧目录移到安装目录之外备份，再替换整个目录。
+
+本仓库不依赖 Codex 插件配置。根目录的 `SKILL.md` 是入口，实际工作流位于 `skills/redthread/SKILL.md`。加载后，按所用工具的方式刷新或重新开启会话。
 
 ## 使用方式
 
 上传一张人物照片后输入：
 
 ```text
-用 $redthread 把这张照片制作成红线双场景拼贴
+使用 redthread 把这张照片制作成红线双场景拼贴
 ```
 
 也可以提出局部修改要求：
 
 ```text
-用 $redthread 调整英日文字的位置，不要遮挡人物的脸和手，同时保留人物与红线锚点
+使用 redthread 调整英日文字的位置，不要遮挡人物的脸和手，同时保留人物与红线锚点
 ```
 
 如果照片中的小指清晰可见，红线会优先连接上下场景中对应的小指；如果小指不可识别，则会选择同一个清晰的人物轮廓尖端作为连接点。

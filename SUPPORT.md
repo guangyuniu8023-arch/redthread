@@ -4,4 +4,4 @@ For installation problems, missing assets, rendering defects, or licensing quest
 
 https://github.com/guangyuniu8023-arch/redthread/issues
 
-Include the Codex or ChatGPT surface used, the relevant error message, and a description of the expected result. Do not attach private portraits or other sensitive material to a public issue.
+Include the host tool used, the relevant error message, and a description of the expected result. Do not attach private portraits or other sensitive material to a public issue.

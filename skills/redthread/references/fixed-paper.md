@@ -1,16 +1,11 @@
-# Mandatory theme-responsive lower-panel paper
+# Lower-panel paper reference
 
-Use `assets/paper/theme-fiber-paper.jpg` as the lower-panel background in every final collage. This bundled file is the user-selected source of truth.
+`assets/paper/theme-fiber-paper.jpg` is the user-selected visual source for the lower background. Supply the actual image to Seedream 5.0 Pro; naming it in the prompt is not sufficient.
 
-## Rules
+Ask the model to fill the lower panel with this paper's visual character and a muted color derived from the source photo. Preserve visible fibers, short dark strands, pulp inclusions, small marks, scan softness, and natural local variation. Keep the texture subordinate to the real subject and handwriting.
 
-- Treat `theme-fiber-paper.jpg` as the only approved lower paper asset.
-- Derive a softened representative theme color from the current source photo.
-- Center-cover-crop the paper to the lower panel; never stretch it.
-- Map the paper's average RGB to the derived theme while retaining its original luminance detail, fibers, pulp inclusions, short dark strands, small marks, scan softness, and local variation.
-- With a selected Python/Pillow backend, use `scripts/recolor_theme_paper.py` for deterministic centered cropping and theme mapping. It requires Pillow but not NumPy and intentionally has no paper override option.
-- With another image backend, reproduce the same operation: center-cover-crop the fixed paper; compute Rec. 709 luminance (`0.2126 R + 0.7152 G + 0.0722 B`); retain `72%` of luminance deviation and `8%` of source chroma around the target RGB; then correct the channel means toward the target before clipping. Do not approximate this with a flat color overlay.
-- Do not generate, repaint, denoise, blur away, or procedurally synthesize the texture.
-- Composite the real subject, Japanese lettering, and connector above the recolored paper.
-- Do not substitute another scan or fall back to a flat color.
-- If the asset is missing or unreadable, stop and report that the Skill installation is incomplete.
+The model generates the paper treatment as part of the complete image. Do not run a recoloring script, calculate a luminance mapping, crop or stretch the paper with code, composite it behind the subject, or add a procedural grain overlay.
+
+The reference should remain recognizable, but model generation does not guarantee identical paper pixels or marks. Inspect the actual output. If the texture is flat, missing, glossy, or unrelated to the reference, request a model edit with the paper image supplied again.
+
+If the bundled paper is missing or unreadable, report an incomplete skill package. Do not substitute another texture without the user's instruction.

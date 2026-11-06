@@ -1,26 +1,32 @@
 {
   "name": "redthread",
-  "version": "1.1.1",
-  "description": "Create polished red-thread dual-scene portrait collages from a single photo.",
+  "version": "1.2.0",
+  "description": "Generate red-thread portrait collages with Seedream 5.0 Pro. Optional segmentation is the only extra image processing.",
   "author": {
     "name": "HuHana77",
     "url": "https://github.com/HuHana77"
   },
-  "homepage": "https://github.com/HuHana77/redthread",
-  "repository": "https://github.com/HuHana77/redthread",
+  "homepage": "https://github.com/guangyuniu8023-arch/redthread",
+  "repository": "https://github.com/guangyuniu8023-arch/redthread",
   "license": "MIT",
-  "keywords": ["photo collage", "portrait", "editorial", "red thread", "Japanese typography"],
+  "keywords": [
+    "photo collage",
+    "portrait",
+    "editorial",
+    "red thread",
+    "Japanese typography"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Redthread",
-    "shortDescription": "Turn one portrait into a poetic red-thread collage.",
-    "longDescription": "Redthread creates a finished 3:4 two-panel editorial collage from one user-supplied portrait. It preserves the real subject, reuses one canonical cutout in both scenes, derives a matching paper palette, adds bilingual hand-lettering, and connects corresponding subject anchors with a restrained wine-red pencil line.",
+    "shortDescription": "Generate a red-thread collage with Seedream 5.0 Pro.",
+    "longDescription": "This revision uses Seedream 5.0 Pro to generate a 3:4 two-panel portrait collage with a warm glowing upper silhouette, a faithful lower subject, theme-colored fiber paper, bilingual handwriting, and one wine-red pencil connector. The model creates all visual content; extra image-processing tools may only segment or extract the subject. User-configured model access is required. Visual consistency is the goal; exact source pixels and TTF rendering are not guaranteed.",
     "developerName": "HuHana77",
     "category": "Creative",
     "capabilities": [],
-    "websiteURL": "https://github.com/HuHana77/redthread",
-    "privacyPolicyURL": "https://github.com/HuHana77/redthread/blob/main/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/HuHana77/redthread/blob/main/TERMS.md",
+    "websiteURL": "https://github.com/guangyuniu8023-arch/redthread",
+    "privacyPolicyURL": "https://github.com/guangyuniu8023-arch/redthread/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/guangyuniu8023-arch/redthread/blob/main/TERMS.md",
     "defaultPrompt": [
       "Use $redthread to turn this portrait into a red-thread dual-scene collage.",
       "Create a poetic bilingual red-thread collage from this photo.",

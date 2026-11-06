@@ -1,10 +1,10 @@
 ---
 name: redthread
-description: Create or revise a finished 3:4 vertical red-thread dual-scene portrait collage from one user-supplied photo. Use for this recurring collage style and for revisions to its subject placement, theme color, bilingual typography, connector anchors, connector shape, hand-drawn texture, or paper color. This is a cross-platform Agent Skill for Codex and other hosts that support standard SKILL.md packages.
+description: Create or revise a Redthread portrait collage with Seedream 5.0 Pro, using two equal panels, a glowing upper silhouette, a matching real lower subject, bilingual handwriting, textured paper, and one wine-red thread.
 ---
 
 # Redthread
 
-This repository-level file is the direct installation entry point for Agent Skills hosts.
+Read [skills/redthread/SKILL.md](skills/redthread/SKILL.md) as the canonical workflow. Resolve its resource paths from `skills/redthread/`.
 
-Before performing a Redthread task, read [skills/redthread/SKILL.md](skills/redthread/SKILL.md) completely and follow it as the canonical workflow. Resolve every relative resource path in that file from `skills/redthread/`. Keep the complete repository contents available because the canonical workflow requires its bundled scripts, references, font, connector templates, and paper texture.
+Seedream 5.0 Pro generates the complete image. Extra image-processing tools may only segment or cut out the source subject. Keep the referenced assets and their licenses when installing this repository.

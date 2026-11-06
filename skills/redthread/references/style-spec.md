@@ -1,73 +1,66 @@
-# Style specification
+# Redthread visual specification
+
+This describes the intended appearance. Seedream 5.0 Pro generates every visible element together; these are not instructions for a software compositor.
 
 ## Canvas and subject
 
 - Use an exact 3:4 vertical canvas with a clean 50/50 horizontal split.
-- Build one canonical transparent subject from the source photo.
-- Preserve identity, expression, pose, scale, hand shape, clothing, accessories, and props.
-- Reuse the exact RGBA subject and alpha contour for both appearances.
-- Keep the upper copy at the source-relative position when practical.
-- Reposition the lower copy by translation only; never resize it independently.
+- Base both appearances on one person or main subject from the original photograph.
+- Preserve recognizable identity, expression, pose, proportions, hand shape, clothing, accessories, held objects, and meaningful motion blur.
+- Match the subject's contour and apparent size between panels. The lower appearance may move horizontally for balance but must not become a differently scaled or newly posed subject.
+- An optional cutout clarifies the source contour. Ask the model to follow it in both panels; do not claim that the generated copies share identical pixels.
 
 ## Upper panel
 
-- Retain the original environment and perspective.
-- Convert the canonical subject to warm cream white without changing its alpha.
-- Add a soft temperature-aware glow outside the contour.
-- Keep the silhouette mostly solid while retaining faint hand or prop detail only when it improves recognition.
+- Retain the source environment, perspective, and photographic character.
+- Keep the subject near its source-relative position when the 3:4 crop permits it.
+- Replace the subject's visible appearance with a mostly solid warm cream-white silhouette of the same shape.
+- Add a soft glow just outside its contour. Keep enough space inside the silhouette for readable English.
+- Preserve faint hand or prop detail only if it improves recognition without turning the silhouette back into a fully detailed person.
 
 ## Lower panel
 
-- Use `assets/paper/theme-fiber-paper.jpg` as the entire background.
-- Center-cover-crop it to the panel without stretching.
-- Recolor its average color to a softened source-derived theme while preserving fibers, short dark strands, pulp marks, scan softness, and local tonal variation.
-- Composite the real canonical subject above the recolored paper without changing identity or photographic texture.
-- Reserve useful negative space on both sides for Japanese.
+- Provide `assets/paper/theme-fiber-paper.jpg` as a direct model reference for the entire lower background.
+- Have the model preserve its recognizable fibers, short dark strands, pulp marks, scan softness, and local tonal variation.
+- Give the paper a muted representative color from the source scene. The model performs this color treatment within the generated image.
+- Keep the real subject photographic and faithful to the source, with balanced negative space for Japanese on both sides.
+- Do not use a flat fill, glossy surface, clean digital gradient, invented decorative pattern, or generic paper effect in place of this reference.
 
 ## Palette
 
-Derive four roles from the source:
+- Environment: retain the source scene's colors in the upper panel.
+- Theme: choose one softened representative scene color for the lower paper.
+- Accent: choose a dark, restrained vintage wine red, brown-red, or brick red for all text and the thread.
+- Glow: use warm white or cream white suited to the source lighting.
 
-1. Environment: retain the source scene in the upper panel.
-2. Theme: sample a muted representative source color for recoloring the fixed paper.
-3. Accent: choose a darker related vintage red, brown-red, or brick red.
-4. Glow: choose neutral white, warm white, or cream white from the source lighting.
+## Lettering
 
-Use the same accent for all lettering and the connector.
+- Write three or four English mood fragments, each two to five words, based on the scene's time, place, action, prop, or emotion.
+- Keep every English letter inside the upper silhouette. Do not spread English onto the environment or lower paper.
+- Write two short Japanese thoughts, one beside each side of the lower subject. Prefer no punctuation.
+- Give the Japanese pair the same apparent letter size. Make them visibly larger than the English where space permits.
+- Use natural two-line breaks and move text closer to the subject if needed. Do not shrink only one Japanese side.
+- Keep text away from eyes, hands, important props, and the thread.
+- Ask the model for the visual handwriting character of DartsFont: informal fine strokes, slight per-letter tilt, gentle baseline drift, and loose spacing. Avoid a polished typeset or brush-calligraphy look.
+- Use small opposing rotations and asymmetric placement. Ask the model to draw the exact selected phrases; visually check every phrase after generation.
+- The font file is provenance and optional design context. An image model does not load it as a deterministic text renderer.
 
-## Text
+## Thread
 
-- Generate three or four English fragments of two to five words from the scene's time, place, action, prop, and emotion.
-- Place all English entirely inside the upper silhouette.
-- Generate two short Japanese thoughts, one on each side of the lower subject.
-- Prefer no punctuation.
-- Give both Japanese fragments exactly the same font size and make them visibly larger than English when space allows.
-- Move Japanese close to the subject contour without touching the face, hands, held prop, or connector.
-- Use natural two-line breaks instead of shrinking one Japanese side independently.
-- Use small opposing rotations and asymmetric placement.
+- Generate exactly one uninterrupted fine line in the same wine-red accent as the lettering.
+- Prefer a clearly visible little-finger contour point. If none is identifiable, select another clear source-visible tip: a fingertip, shoe tip, hair tip, garment corner, or held-prop tip.
+- For a non-human subject, use a clear corresponding tip on the main object.
+- Both endpoints must visibly touch the same selected point on the upper silhouette and lower real subject. Do not land beside the subject or invent a finger.
+- Draw three to five clearly distinct loose curls. Vary size, direction, and spacing, with long calm sections between some curls.
+- Use a thin, semi-dry colored-pencil or wax-crayon stroke, with restrained pressure variation, fine edge fibers, and slight paper show-through.
+- Avoid faces, eyes, lettering, and important props, except for the intentional endpoint contact if the anchor is on a prop.
+- Reject thick marker strokes, opaque vector lines, fuzzy airbrush lines, dotted fragments, knots, repeated springs, telephone cords, regular sine waves, and a single large S-curve.
+- Former connector templates document the earlier design. They are not an executable dependency and must not be rendered or composited into the image.
 
-## Connector
+## Inspection and delivery
 
-- Use one uninterrupted line rendered from `assets/connectors/templates.json` by `scripts/render_connector.py` in the text accent color.
-- When the canonical subject contains a person and a little finger is clearly visible, connect the upper and lower copies at the exact corresponding subject-local point on that little finger.
-- If no little finger is identifiable, freely choose any clear pointed extremity on the subject contour, such as another fingertip, a shoe tip, a hair tip, a garment corner, or a held-prop tip. Do not invent missing geometry.
-- For a non-human subject, choose any clear contour tip on the main object.
-- In every case, transfer one selected subject-local point to both copies and make both endpoints visibly meet it rather than nearby empty space.
-- Prefer long loose meanders with three to five isolated curls.
-- Vary curl size, direction, spacing, and pressure.
-- Use the renderer's thin colored-pencil treatment: a semi-dry wine-red core, faint offset fibers, subtly irregular edges, and small translucent grain that lets the background show through.
-- Match the quiet hand-drawn character of the DartsFont lettering without copying glyph shapes or making the connector look fuzzy.
-- Keep the line readable at thumbnail size and away from the face and eyes.
-- Prefer `--template auto --mirror auto` and supply a protected-area mask so template selection can avoid important content.
-- Do not generate or redraw the connector with an image model, Pillow primitives, a sine wave, random points, or a newly invented spline.
-- Reject thick marker strokes, fully opaque solid vectors, airbrush softness, broken dotted lines, springs, telephone cords, stacked circles, repeated loops, small attached blobs, regular S-curves, and straight vertical spines.
+Inspect the actual returned PNG. Check face and hand fidelity, text accuracy, panel balance, paper character, matching subject size, endpoint contact, and thread curls.
 
-## Final output
+At a small on-screen scale, the subject, two-panel structure, wine-red lettering and thread, Japanese side placement, and paper must remain clear. Viewing at another scale does not require generating a resized file.
 
-- Treat the assembled composition as the final image; do not create an approval proof followed by a separate filter pass.
-- Preserve the fixed paper's visible texture. Do not cover it with synthetic paper grain or replace it with a flat color.
-- Keep the real lower subject naturally integrated with the theme color without rebuilding the face or clothing.
-- Inspect both full resolution and a roughly 400 px thumbnail privately, then deliver one final PNG.
-- Keep the subject cutout, masks, connector asset, component layers, and QA thumbnail internal. Do not preview, attach, link, or place them in the user-facing output directory unless the user explicitly asks for a specific intermediate.
-
-At thumbnail size, the person, two-panel structure, wine-red graphic system, Japanese side placement, and paper texture must remain immediately readable.
+Use a targeted model edit for an observed defect. Keep the original source and paper reference available during revisions. Deliver one finished PNG; keep the cutout, masks, and rejected attempts private.

@@ -6,12 +6,14 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import platform
 import random
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -66,7 +68,7 @@ def read_config(path):
 def validate_config(data, base_dir):
     if not isinstance(data, dict):
         raise RenderError('INVALID_CONFIG', 'The brief must be a JSON object.')
-    unknown = set(data) - {'source', 'mask', 'english', 'japanese', 'theme', 'seed', 'anchor', 'subject_point'}
+    unknown = set(data) - {'source', 'mask', 'english', 'japanese', 'theme', 'seed', 'anchor', 'subject_point', 'segmentation'}
     if unknown:
         raise RenderError('INVALID_CONFIG', 'Unknown fields: ' + ', '.join(sorted(unknown)))
     if not isinstance(data.get('source'), str) or not data['source']:
@@ -97,7 +99,108 @@ def validate_config(data, base_dir):
     if not isinstance(data.get('seed', 29), int) or isinstance(data.get('seed'), bool):
         raise RenderError('INVALID_CONFIG', 'seed must be an integer.')
     data.setdefault('seed', 29)
+    if 'mask' in data:
+        # A supplied mask completely bypasses segmentation configuration, including
+        # a stale or invalid host setting. Record only the route used for replay.
+        data.pop('segmentation', None)
+    else:
+        if 'segmentation' not in data and 'REDTHREAD_SEGMENTATION' in os.environ:
+            try:
+                data['segmentation'] = json.loads(os.environ['REDTHREAD_SEGMENTATION'])
+            except (ValueError, TypeError) as exc:
+                raise RenderError('INVALID_CONFIG', 'REDTHREAD_SEGMENTATION must contain a segmentation JSON object.',
+                                  'Configure the existing segmenter command, or provide mask.') from exc
+        if 'segmentation' in data:
+            data['segmentation'] = validate_segmentation(data['segmentation'], data.get('subject_point'))
     return data
+
+
+def validate_segmentation(value, subject_point=None):
+    if not isinstance(value, dict) or set(value) - {'command', 'output', 'timeout'}:
+        raise RenderError('INVALID_CONFIG', 'segmentation must be an object with command, output and timeout fields only.')
+    command = value.get('command')
+    if (not isinstance(command, list) or not command or
+            any(not isinstance(arg, str) or not arg or '\0' in arg for arg in command)):
+        raise RenderError('INVALID_CONFIG', 'segmentation.command must be a nonempty list of nonempty argument strings.',
+                          'Use the trusted host interface as argv; no shell is started.')
+    for token in ('{source}', '{output}'):
+        if not any(token in arg for arg in command):
+            raise RenderError('INVALID_CONFIG', f'segmentation.command must contain {token}.')
+    point_tokens = [any(token in arg for arg in command) for token in ('{subject_x}', '{subject_y}')]
+    if any(point_tokens) and (not all(point_tokens) or subject_point is None):
+        raise RenderError('INVALID_CONFIG', 'Both {subject_x} and {subject_y} require subject_point in the brief.')
+    if subject_point is not None and not all(point_tokens):
+        raise RenderError('INVALID_CONFIG', 'A configured command must accept both {subject_x} and {subject_y} when subject_point is supplied.',
+                          'Use an adapter that selects the requested subject, or provide an explicit mask. For a fixed-subject segmenter, omit subject_point only when its selected subject is already correct.')
+    output = value.get('output', 'mask')
+    if output not in ('mask', 'alpha'):
+        raise RenderError('INVALID_CONFIG', 'segmentation.output must be mask or alpha.')
+    timeout = value.get('timeout', 180)
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 1800:
+        raise RenderError('INVALID_CONFIG', 'segmentation.timeout must be an integer from 1 to 1800 seconds.')
+    return {'command': list(command), 'output': output, 'timeout': timeout}
+
+
+def configured_mask(config, source, work):
+    adapter = config['segmentation']
+    # A fresh output path prevents an unsuccessful command from reusing a mask
+    # left by an earlier run. Temporary model RGB pixels never enter composition.
+    with tempfile.TemporaryDirectory(prefix='segmentation-', dir=work) as directory:
+        srcfile = Path(directory) / 'source.png'
+        maskfile = Path(directory) / 'output.png'
+        source.save(srcfile)
+        replacements = {'{source}': str(srcfile), '{output}': str(maskfile)}
+        if 'subject_point' in config:
+            replacements.update(zip(('{subject_x}', '{subject_y}'), map(str, config['subject_point'])))
+        command = []
+        for argument in adapter['command']:
+            for token, replacement in replacements.items():
+                argument = argument.replace(token, replacement)
+            command.append(argument)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, errors='replace',
+                                    timeout=adapter['timeout'], shell=False)
+        except FileNotFoundError as exc:
+            raise RenderError('SEGMENTATION_COMMAND_MISSING', 'The configured segmentation executable was not found.',
+                              'Correct segmentation.command to the installed host interface; this does not mean the sandbox lacks a model.') from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RenderError('SEGMENTATION_TIMEOUT', f'The configured segmenter exceeded {adapter["timeout"]} seconds.',
+                              'Check the host segmenter, adjust its timeout, or provide mask.') from exc
+        except OSError as exc:
+            raise RenderError('SEGMENTATION_FAILED', f'The configured segmenter could not start: {exc}',
+                              'Check executable permissions and the host command interface.') from exc
+        if result.returncode:
+            detail = result.stderr.strip()[-1800:]
+            raise RenderError('SEGMENTATION_FAILED', f'The configured segmenter exited with code {result.returncode}. {detail}',
+                              'Check the existing segmenter command and model configuration; do not substitute image generation.')
+        if not maskfile.is_file():
+            raise RenderError('SEGMENTATION_OUTPUT_MISSING', 'The configured segmenter did not write its {output} file.',
+                              'Use the installed command interface that writes a same-size mask or RGBA image to {output}.')
+        try:
+            with Image.open(maskfile) as result_image:
+                if result_image.size != source.size:
+                    raise RenderError('MASK_SIZE', f'Segmentation output {result_image.size} does not match oriented source {source.size}.',
+                                      'Return output at the EXIF-oriented source dimensions; do not resize it silently.')
+                if adapter['output'] == 'alpha':
+                    if result_image.mode != 'RGBA':
+                        raise RenderError('SEGMENTATION_OUTPUT_MODE', 'alpha output requires an RGBA image with a subject alpha channel.',
+                                          'Return RGBA, or configure mask output with a grayscale image.')
+                    mask = result_image.getchannel('A')
+                else:
+                    if result_image.mode not in ('1', 'L'):
+                        raise RenderError('SEGMENTATION_OUTPUT_MODE', f'mask output requires an L or 1 grayscale image, received {result_image.mode}.',
+                                          'Configure the segmenter to export a white-foreground grayscale mask, or use alpha for RGBA.')
+                    mask = result_image.convert('L')
+        except OSError as exc:
+            raise RenderError('SEGMENTATION_OUTPUT_INVALID', 'The configured segmenter output is not a readable image.') from exc
+        if mask.getextrema()[1] < 128:
+            raise RenderError('EMPTY_MASK', 'The configured segmenter did not return a foreground subject.')
+        if mask.getextrema() == (255, 255):
+            raise RenderError('FULL_MASK', 'The configured segmenter returned an entirely opaque mask.',
+                              'Return a foreground subject mask with background pixels, not the full image rectangle.')
+        return mask, {'method': 'configured-command', 'output': adapter['output'],
+                      'sha256': sha256(maskfile),
+                      'subject_selection': {'normalized_point': config['subject_point']} if 'subject_point' in config else 'host-segmenter default; inspect mask visually'}
 
 
 def check_glyphs(texts):
@@ -126,8 +229,11 @@ def get_mask(config, source, work):
         except OSError as exc:
             raise RenderError('MASK_UNREADABLE', str(exc), 'Supply a white-foreground grayscale PNG.') from exc
         return mask, {'method': 'supplied-mask', 'sha256': sha256(config['mask']), 'subject_selection': 'caller-supplied; inspect mask visually'}
+    if 'segmentation' in config:
+        return configured_mask(config, source, work)
     if platform.system() != 'Darwin':
-        raise RenderError('MASK_REQUIRED', 'Automatic segmentation requires macOS 14+ with Swift and Vision.', 'Use a segmentation tool to create a same-size grayscale mask; set mask in the brief.')
+        raise RenderError('SEGMENTATION_NOT_CONFIGURED', 'No segmentation command has been configured for this renderer.',
+                          'Connect the sandbox\'s existing subject-segmentation interface through segmentation.command or REDTHREAD_SEGMENTATION, or provide mask. This does not establish that the sandbox lacks a segmentation model.')
     if not shutil.which('swift'):
         raise RenderError('SWIFT_MISSING', 'The swift command is unavailable.', 'Provide a segmentation mask using the mask field, or install the Apple command-line tools.')
     srcfile = work / 'normalized-source.png'
@@ -469,6 +575,7 @@ def main():
     print(json.dumps({
         'status': 'success', 'output': str(final), 'report': str(out / 'report.json'),
         'brief': report['brief'],
+        'segmentation': report.get('segmentation'),
         'checks': {
             'glyph_coverage': report['glyph_coverage'],
             'alpha_reused_exactly': report['alpha_reused_exactly'],

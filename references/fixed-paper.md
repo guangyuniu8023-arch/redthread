@@ -1,11 +1,7 @@
-# Lower-panel paper reference
+# 原版纸纹
 
-`assets/paper/theme-fiber-paper.jpg` is the user-selected visual source for the lower background. Supply the actual image to Seedream 5.0 Pro; naming it in the prompt is not sufficient.
+整个下半区使用 `assets/paper/theme-fiber-paper.jpg`。该素材与 `scripts/recolor_theme_paper.py` 均保留原版内容。
 
-Ask the model to fill the lower panel with this paper's visual character and a muted color derived from the source photo. Preserve visible fibers, short dark strands, pulp inclusions, small marks, scan softness, and natural local variation. Keep the texture subordinate to the real subject and handwriting.
+单入口自动调用纸纹处理。原算法先居中等比裁切，再保留 72% 亮度偏差与 8% 原色度，将平均色调整到主题色。不得用纯色、另一张扫描图或生成纸纹替代。
 
-The model generates the paper treatment as part of the complete image. Do not run a recoloring script, calculate a luminance mapping, crop or stretch the paper with code, composite it behind the subject, or add a procedural grain overlay.
-
-The reference should remain recognizable, but model generation does not guarantee identical paper pixels or marks. Inspect the actual output. If the texture is flat, missing, glossy, or unrelated to the reference, request a model edit with the paper image supplied again.
-
-If the bundled paper is missing or unreadable, report an incomplete skill package. Do not substitute another texture without the user's instruction.
+纸纹位于下方人物、文字和红线之下。必须保留纤维、短暗线和局部明暗。缺少素材时停止并恢复文件包。

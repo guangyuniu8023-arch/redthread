@@ -1,43 +1,46 @@
 ---
-name: redthread
-description: Create or revise a Redthread portrait collage with Seedream 5.0 Pro, using two equal panels, a glowing upper silhouette, a matching real lower subject, bilingual handwriting, textured paper, and one wine-red thread.
+name: redthread-classic-simple
+description: 将一张照片制作成 Redthread 双层拼贴。保留原版人物分割、同一人物像素复用、DartsFont 英日文字、固定纸纹和模板红线的代码渲染流程。通过一个 JSON 和一个命令生成最终 PNG。用于制作或修改此风格照片拼贴，尤其适合不需要编写合成代码的 Agent。无需生图模型。
 ---
 
-# Redthread
+# Redthread 原逻辑简化版
 
-Create one finished 3:4 portrait collage from the user's photo. Preserve the established visual design while letting Seedream 5.0 Pro generate the full composition, including text, thread, paper treatment, lighting, and layout.
+使用现成渲染器。Agent 只需看图、填写简报、运行命令和检查成图。不要编写合成脚本、替换素材或调用生图模型。
 
-## Workflow
+## 执行
 
-For a revision of an existing collage, inspect that collage first and go directly to the targeted-correction prompt. Use the current collage as Image 1, not as a style-only reference. Preserve correct wording, subject, layout, and anchors. Supply the original photo or paper only when the correction needs them. Skip new wording and a full initial generation unless the user requests a redesign.
+1. 查看原图。确定主体，写 3–4 条英文短语和 2 条日文短句。英文每条宜为 2–5 个词。日文可以用 `\n` 分行。若小指清晰可见，用 `anchor` 指向小指轮廓；否则可指定包角、衣角等清楚的轮廓尖端。没有明确锚点时可省略，但必须检查自动选点。
+2. 在任务目录创建 `brief.json`。路径相对这个 JSON 所在目录解析。完整字段与失败处理见 [输入说明](references/input.md)。
 
-1. Inspect the source photo. Identify the subject, important props, scene, muted theme color, and a visible little-finger anchor. If no little finger is identifiable, select a clear contour tip visible in the source. Use the same point in both panels.
-2. Read [the visual specification](references/style-spec.md) and [the prompt template](references/model-prompt.md). Select three or four short English fragments and two Japanese thoughts that suit this photo. Describe the intended layout and anchor briefly.
-3. Supply the original photo and `assets/paper/theme-fiber-paper.jpg` as model image references. Reuse an available subject cutout if it helps preserve shape. Otherwise, use a segmentation tool only when needed. A previous collage may be an optional reference for layout and handwriting; do not copy its person, scene, or defects. Specify the face, text, and prop regions the thread must avoid.
-4. Use the host's configured **Seedream 5.0 Pro** endpoint and credentials. Read [provider notes](references/seedream-provider.md) when making the request. Generate the whole final image in one request using the filled prompt and clearly identified reference roles.
-5. Inspect the returned image at full detail and at a small on-screen viewing scale. Check the visual gate below. For a visible defect, use a targeted edit from the same model. Normally allow up to two corrective edits. If both repeat or worsen the same defect, allow one fresh generation from the original references, omitting the defective composition. Stop on an unresolved provider failure or an uncertain request outcome. Report remaining defects honestly instead of silently changing models or switching to programmatic composition.
-6. Save and show one inspected final PNG. Keep cutouts, masks, requests, and alternate attempts in the task's private `work/` directory. Put only the selected final image in `outputs/`. Do not expose intermediate images unless the user asks for them.
+```json
+{
+  "source": "source.jpg",
+  "english": ["OPEN GATE", "GRAY SKY", "A NEW PATH"],
+  "japanese": ["ここから\nはじまる", "風に\nさそわれて"]
+}
+```
 
-## Execution boundary
+3. 使用宿主已有的 Python 3.10+ 和 Pillow 9.1+。下文 `python3` 代表这个解释器。在本 skill 目录运行：
 
-- Only segmentation or subject cutout may use an extra image-processing tool. Its output is a model reference, not a layer to composite with code.
-- All visible content and revisions must come from Seedream 5.0 Pro. Do not draw text or paths, recolor paper, assemble layers, apply filters, resize, crop, or repair the output with scripts or a graphics compositor.
-- Ordinary API requests, byte-for-byte image storage, PNG metadata checks, and image viewing are allowed. These operations transfer or inspect an image; they do not create or alter its visible content.
-- Request the intended 3:4 size and PNG format from the provider. If the result has the wrong size, correct the model request. Do not resize the file as a workaround.
-- The bundled font and former connector templates are historical design references. Do not run a font renderer, glyph checker, paper recolorer, connector renderer, or legacy compositor.
-- Do not promise exact font loading, identical RGBA pixels, or deterministic paper reconstruction. Judge visual fidelity from the actual generated image.
-- If the required model or paper reference is unavailable, report the missing input or failed request. Do not silently substitute another model, paper, or procedural renderer.
-- Do not include private source photos, cutouts, or past user collages in a redistributed skill package.
+```bash
+python3 scripts/render.py --config /absolute/path/brief.json --out /absolute/path/result
+```
 
-## Visual gate
+macOS 14+ 可通过 Swift 和 Apple Vision 自动分割。其他系统在 JSON 中添加 `mask`，指向与原图等尺寸的白色前景、黑色背景灰度 PNG。已有遮罩时不必重新分割。
 
-- Exact 3:4 canvas; clean horizontal split into equal upper and lower panels.
-- Upper panel keeps the source environment and has a warm cream-white glowing silhouette of the subject.
-- Lower panel has the same recognizable subject, pose, contour, and apparent size, with faithful face, hands, clothing, and props.
-- Lower paper visibly follows the bundled paper reference, with muted scene-derived color, fibers, strands, and natural marks.
-- Three or four legible English fragments stay inside the upper silhouette. Two legible Japanese thoughts sit near opposite sides of the lower subject at the same apparent letter size.
-- Lettering evokes DartsFont's informal handwriting. The lettering and thread share a restrained wine-red accent.
-- One continuous, fine colored-pencil thread connects the corresponding anchors. It has three to five loose, unevenly spaced curls and avoids faces, lettering, and important props.
-- No extra subject, duplicate limb, cropped essential prop, blank edge, malformed text, or watermark is visible.
+4. 检查退出码和 `result/report.json`。成功后查看 `result/outputs/final.png` 的完整图和 `result/work/preview.jpg` 的 400 px 内部缩略图。确认人脸、手、包等道具完整；英文在上方剪影内；两侧日文清楚；红线两端接触同一轮廓点。满足后只交付最终 PNG。`work/` 是内部素材，不展示。
 
-Read [font and license notes](references/font-and-license.md) for lettering changes or redistribution, [paper notes](references/fixed-paper.md) for paper revisions, and [connector notes](references/connector-templates.md) for thread revisions. The inspected image is the final deliverable; no later filter pass is required.
+## 固定规则
+
+- 1200×1600，上下各 800 px。同一个人物 RGBA 层复用两次，比例相同；下方只允许平移。
+- 上方保留原环境，人物改为暖白剪影。下方使用原纸纹与原人物像素。
+- 全部文字使用原 DartsFont。两侧日文使用同一字号。文字和红线统一使用酒红色。
+- 红线只用原模板与原铅笔笔触。渲染器检查整条笔触，保护人物、道具和文字；仅允许端点附近必要接触。
+- 渲染器自动完成字体检查、纸纹改色、排版、有限布局搜索及合成。不要分别调用内部辅助脚本。
+- 程序检查不能判断分割是否漏手、文字是否自然或锚点是否确为小指。Agent 必须看图。细则见 [视觉要求](references/style-spec.md)。
+
+## 修改与失败
+
+修改同一份 JSON 后重新运行。保留 `source`、`mask`、`anchor` 和 `seed`，可保持输入与锚点稳定。不要在扁平成图上叠加修改。
+
+失败时读取报告中的错误与处理建议。优先缩短文案、修正遮罩或锚点；不要靠随机换种子反复尝试。没有合法构图时说明原因，不关闭碰撞检查或交付失败图。缺少字体、纸纹、模板时恢复完整 skill 包，不用替代素材。

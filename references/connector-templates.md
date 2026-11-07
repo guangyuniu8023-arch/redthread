@@ -1,21 +1,13 @@
-# Model-generated thread
+# 红线实现说明
 
-Seedream 5.0 Pro draws the thread within the full composition. Do not render a separate connector asset, execute historical template code, build a path with code, or composite a line over the output.
+日常运行只调用 `scripts/render.py`。此文件用于维护和诊断。
 
-## Shape and texture
+使用原始 `assets/connectors/templates.json`。渲染器保留原版曲线采样、压力变化、半透明铅笔主线、两条细纤维和微粒纹理。不得新增控制点来替代模板，不得调用生图模型重画红线。
 
-Specify one continuous, fine wine-red colored-pencil line with three to five loose curls. Vary their size, direction, and spacing. Include long relaxed sections between some curls. Use restrained pressure changes, fine dry edge fibers, and slight paper show-through. Keep the stroke clear at a small viewing scale.
+`choose_safe_candidate` 在原模板、镜像与有限横向展开系数中选择。两个端点从同一个主体局部点映射，因此下方人物平移后锚点仍一致。
 
-Avoid thick opaque markers, smooth solid vectors, fuzzy airbrush lines, broken dots, knots, springs, telephone cords, stacked circles, regular sine waves, and a single large S-curve.
+传入原始保护遮罩：白色为保护区，黑色为自由区。保护区包含完整上下主体和全部文字。接触豁免仅限距各端点 `max(2, stroke_width * 1.5)` 像素的圆形范围，不再按曲线采样点比例排除。
 
-## Endpoints
+程序检查完整笔触及画布边界。没有合法候选时抛出 `NO_SAFE_CONNECTOR`。单入口可尝试有限的下方人物位置；全部失败时不输出成功图。种子只用于稳定排序及纹理，不是解决碰撞的重试开关。
 
-Describe one precise, source-visible subject anchor in the prompt. Prefer a little finger when identifiable. Otherwise use another clear contour tip, such as a shoe tip, garment corner, or held-prop tip. Use the corresponding point in both panels.
-
-The endpoints must visibly touch the selected upper silhouette point and lower real-subject point. A nearby floating endpoint does not pass. Avoid face, eyes, hands, text, and important props along the route, except for the small intended endpoint contact.
-
-## Revisions
-
-Inspect the line in the complete generated composition. If an endpoint floats, name that exact endpoint in a model edit. If curls are too regular or numerous, specify the observed issue and the intended three-to-five loose curls. Preserve the rest of the image and the selected anchor.
-
-The former authored connector templates are historical design material. The new workflow does not require them, derive executable geometry from them, or run a template renderer.
+程序通过后仍需检查：两端确实接触目标点；3–5 个卷曲可辨；线条连续、疏松且像细铅笔；没有变成结团、粗马克笔或虚线。内部红线 PNG 不单独交付。

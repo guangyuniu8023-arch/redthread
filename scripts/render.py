@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""Render the classic Redthread style from one JSON brief; no image-generation API."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import platform
+import random
+import shutil
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat, __version__ as PILLOW_VERSION
+except ImportError:
+    print('DEPENDENCY_MISSING: Install Pillow: python -m pip install Pillow', file=sys.stderr)
+    raise SystemExit(2)
+
+import check_font_glyphs as glyphs
+import recolor_theme_paper as paper
+import render_connector as connector
+
+ROOT = Path(__file__).resolve().parents[1]
+FONT = ROOT / 'assets/fonts/dartsfont/DartsFont-Regular.ttf'
+PAPER = ROOT / 'assets/paper/theme-fiber-paper.jpg'
+TEMPLATES = ROOT / 'assets/connectors/templates.json'
+CANVAS = (1200, 1600)
+PANEL = (1200, 800)
+ACCENT = '#8F2634'
+
+
+class RenderError(ValueError):
+    def __init__(self, code, message, remedy=''):
+        self.code, self.message, self.remedy = code, message, remedy
+        super().__init__(f'{code}: {message}' + (f' {remedy}' if remedy else ''))
+
+
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def normalized_point(value, field):
+    if (not isinstance(value, list) or len(value) != 2 or
+            any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or not 0 <= v <= 1 for v in value)):
+        raise RenderError('INVALID_CONFIG', f'{field} must contain two numbers between 0 and 1.')
+    return value
+
+
+def read_config(path):
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise RenderError('INVALID_CONFIG', str(exc), 'Provide a readable JSON brief.') from exc
+    if not isinstance(data, dict):
+        raise RenderError('INVALID_CONFIG', 'The brief must be a JSON object.')
+    unknown = set(data) - {'source', 'mask', 'english', 'japanese', 'theme', 'seed', 'anchor', 'subject_point'}
+    if unknown:
+        raise RenderError('INVALID_CONFIG', 'Unknown fields: ' + ', '.join(sorted(unknown)))
+    if not isinstance(data.get('source'), str) or not data['source']:
+        raise RenderError('INVALID_CONFIG', 'source must be an image path.')
+    for name, allowed in [('english', (3, 4)), ('japanese', (2,))]:
+        parts = data.get(name)
+        if not isinstance(parts, list) or len(parts) not in allowed or any(not isinstance(t, str) or not t.strip() for t in parts):
+            raise RenderError('INVALID_CONFIG', f'{name} requires {allowed} nonempty text fragments.')
+        data[name] = [t.strip() for t in parts]
+    if any(len(t) > 40 or '\n' in t for t in data['english']):
+        raise RenderError('COPY_TOO_LONG', 'Each English fragment must be one line, at most 40 characters.', 'Use 3–4 short phrases; 2–3 words per phrase usually fit.')
+    if any(len(t) > 40 or len(t.splitlines()) > 3 or any(len(s) > 12 for s in t.splitlines()) for t in data['japanese']):
+        raise RenderError('COPY_TOO_LONG', 'Each Japanese block supports up to three short lines, at most 12 characters per line.', 'Use explicit \\n line breaks or shorter text.')
+    for name in ('source', 'mask'):
+        if name in data:
+            if not isinstance(data[name], str) or not data[name]:
+                raise RenderError('INVALID_CONFIG', f'{name} must be an image path.')
+            p = Path(data[name]).expanduser()
+            data[name] = p.resolve() if p.is_absolute() else (path.parent / p).resolve()
+    for name in ('anchor', 'subject_point'):
+        if name in data:
+            normalized_point(data[name], name)
+    if 'theme' in data:
+        try:
+            paper.parse_color(data['theme'])
+        except (ValueError, TypeError, AttributeError, argparse.ArgumentTypeError) as exc:
+            raise RenderError('INVALID_CONFIG', 'theme must be a hexadecimal color such as #B4B9A8.') from exc
+    if not isinstance(data.get('seed', 29), int) or isinstance(data.get('seed'), bool):
+        raise RenderError('INVALID_CONFIG', 'seed must be an integer.')
+    data.setdefault('seed', 29)
+    return data
+
+
+def check_glyphs(texts):
+    if not FONT.is_file():
+        raise RenderError('ASSET_MISSING', str(FONT), 'Restore the original assets directory.')
+    missing = []
+    try:
+        cmaps = glyphs.unicode_cmaps(FONT)
+        for char in ''.join(texts):
+            if char.isspace():
+                continue
+            if not any((fmt == 4 and glyphs.glyph4(table, ord(char))) or
+                       (fmt == 12 and glyphs.glyph12(table, ord(char))) for fmt, table in cmaps):
+                missing.append(char)
+    except (OSError, ValueError, IndexError, struct.error, SystemExit) as exc:
+        raise RenderError('ASSET_INVALID', f'The bundled DartsFont cannot be parsed: {exc}', 'Restore assets/fonts/dartsfont/DartsFont-Regular.ttf from the original package.') from exc
+    if missing:
+        raise RenderError('MISSING_GLYPHS', 'DartsFont does not contain: ' + ''.join(dict.fromkeys(missing)), 'Rewrite these characters using the original font’s supported letters or kana; do not substitute the font.')
+
+
+def get_mask(config, source, work):
+    if 'mask' in config:
+        try:
+            with Image.open(config['mask']) as im:
+                mask = im.convert('L')
+        except OSError as exc:
+            raise RenderError('MASK_UNREADABLE', str(exc), 'Supply a white-foreground grayscale PNG.') from exc
+        return mask, {'method': 'supplied-mask', 'sha256': sha256(config['mask']), 'subject_selection': 'caller-supplied; inspect mask visually'}
+    if platform.system() != 'Darwin':
+        raise RenderError('MASK_REQUIRED', 'Automatic segmentation requires macOS 14+ with Swift and Vision.', 'Use a segmentation tool to create a same-size grayscale mask; set mask in the brief.')
+    if not shutil.which('swift'):
+        raise RenderError('SWIFT_MISSING', 'The swift command is unavailable.', 'Provide a segmentation mask using the mask field, or install the Apple command-line tools.')
+    srcfile = work / 'normalized-source.png'
+    source.save(srcfile)
+    maskfile = work / 'source-mask.png'
+    command = ['swift', str(Path(__file__).with_name('segment_macos.swift')), str(srcfile), str(maskfile)]
+    if 'subject_point' in config:
+        command += [str(v) for v in config['subject_point']]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired as exc:
+        raise RenderError('SEGMENTATION_TIMEOUT', 'Vision segmentation did not finish within 180 seconds.', 'Provide an external mask.') from exc
+    if result.returncode:
+        detail = result.stderr.strip()[-1800:]
+        code = 'MULTIPLE_SUBJECTS' if 'MULTIPLE_SUBJECTS' in detail else 'SEGMENTATION_FAILED'
+        if 'SUBJECT_POINT_BACKGROUND' in detail:
+            code = 'SUBJECT_POINT_BACKGROUND'
+        raise RenderError(code, detail, 'Set subject_point to a visible point inside the intended person, or provide a mask.')
+    try:
+        metadata = json.loads(result.stdout.strip().splitlines()[-1])
+        mask = Image.open(maskfile).convert('L')
+    except (ValueError, OSError, IndexError) as exc:
+        raise RenderError('SEGMENTATION_FAILED', 'Segmenter did not return a valid mask and report.') from exc
+    return mask, {'method': 'apple-vision-single-instance', **metadata, 'sha256': sha256(maskfile)}
+
+
+def prepare_subject(source, mask):
+    if source.size != mask.size:
+        raise RenderError('MASK_SIZE', f'Mask {mask.size} does not match oriented source {source.size}.', 'Create a mask from the EXIF-oriented source, at the same pixel dimensions.')
+    if mask.getbbox() is None or mask.getextrema()[1] < 128:
+        raise RenderError('EMPTY_MASK', 'The mask does not contain a foreground subject.')
+    scale = max(PANEL[0] / source.width, PANEL[1] / source.height)
+    resized = (math.ceil(source.width * scale), math.ceil(source.height * scale))
+    left = (resized[0] - PANEL[0]) // 2
+    source_bbox = mask.point(lambda p: 255 if p >= 128 else 0).getbbox()
+    touches_bottom = source_bbox[3] >= source.height - 2
+    top = resized[1] - PANEL[1] if touches_bottom else (resized[1] - PANEL[1]) // 2
+    crop = (left, top, left + PANEL[0], top + PANEL[1])
+    photo = source.convert('RGB').resize(resized, Image.Resampling.LANCZOS).crop(crop).convert('RGBA')
+    alpha = mask.resize(resized, Image.Resampling.LANCZOS).crop(crop)
+    bbox = alpha.getbbox()
+    if bbox is None or bbox[2] - bbox[0] < 90 or bbox[3] - bbox[1] < 180:
+        raise RenderError('SUBJECT_TOO_SMALL', 'The subject is too small after the fixed panel crop.', 'Use a closer portrait with enough torso area for the English text.')
+    # Reject newly cut faces/heads at the top; a pre-existing image-edge cut remains explicit.
+    if source_bbox[1] * scale < top - 2:
+        raise RenderError('SUBJECT_CROPPED', 'The 3:2 upper panel would cut new content from the top of the subject.', 'Choose a wider photo or crop the source deliberately before running.')
+    if source_bbox[0] * scale < left - 2 or source_bbox[2] * scale > left + PANEL[0] + 2 or source_bbox[3] * scale > top + PANEL[1] + 2:
+        raise RenderError('SUBJECT_CROPPED', 'The fixed panel crop would cut new subject content at a side or bottom edge.', 'Choose a source composition that retains the selected subject inside the upper panel.')
+    canonical = photo.crop(bbox)
+    canonical.putalpha(alpha.crop(bbox))
+    return photo, alpha, canonical, bbox, {'uniform_scale': scale, 'resized': list(resized), 'crop_offset': [left, top], 'bottom_aligned': touches_bottom}
+
+
+def contour_points(alpha):
+    # The exact outer boundary of the canonical alpha includes resampling fringes.
+    # The connector gate protects those same pixels, so snap to that same boundary.
+    binary = alpha.point(lambda p: 255 if p else 0)
+    edge = ImageChops.subtract(binary, binary.filter(ImageFilter.MinFilter(3)))
+    pixels = edge.load()
+    box = edge.getbbox()
+    return [(x, y) for y in range(box[1], box[3]) for x in range(box[0], box[2]) if pixels[x, y]]
+
+
+def choose_anchor(alpha, bbox, supplied=None):
+    points = contour_points(alpha)
+    if supplied is not None:
+        chosen = min(points, key=lambda p: (p[0] - supplied[0]) ** 2 + (p[1] - supplied[1]) ** 2)
+        distance = math.dist(chosen, supplied)
+        if distance > 60:
+            raise RenderError('ANCHOR_TOO_FAR', f'Anchor is {distance:.1f} panel pixels from the silhouette contour.', 'Place anchor on the intended visible contour tip in the source image.')
+        return chosen, {'method': 'provided-point-snapped-to-contour', 'snap_distance': round(distance, 3)}
+    h = bbox[3] - bbox[1]
+    lower = [p for p in points if bbox[1] + h * .50 <= p[1] <= bbox[1] + h * .94 and 18 <= p[0] < 1182]
+    if not lower:
+        raise RenderError('ANCHOR_UNAVAILABLE', 'No lower contour point has enough canvas clearance.', 'Supply an anchor on a clear visible contour point.')
+    # Prefer the side with more open space. Pick its contour extreme, then the lowest
+    # near-extreme point, which is a deterministic outline tip, not a finger detector.
+    side = 'left' if bbox[0] >= PANEL[0] - bbox[2] else 'right'
+    extreme = min(p[0] for p in lower) if side == 'left' else max(p[0] for p in lower)
+    near = [p for p in lower if abs(p[0] - extreme) <= 2]
+    chosen = max(near, key=lambda p: p[1])
+    return chosen, {'method': 'automatic-lower-contour-extreme', 'side': side, 'semantic_identity': 'unclassified contour tip; visually inspect'}
+
+
+def handtext(text, size, seed, angle=0):
+    rng = random.Random(f'{seed}:{text}:{size}')
+    font = ImageFont.truetype(str(FONT), size)
+    advances = [font.getlength(c) + size * .10 for c in text]
+    result = Image.new('RGBA', (max(1, int(sum(advances) + size * 3)), size * 4))
+    x = size
+    for char, step in zip(text, advances):
+        cell = Image.new('RGBA', (size * 3, size * 3))
+        ImageDraw.Draw(cell).text((size, size), char, font=font, fill=ACCENT, anchor='mm')
+        cell = cell.rotate(rng.uniform(-2, 2), resample=Image.Resampling.BICUBIC)
+        result.alpha_composite(cell, (int(x - size), int(size * .35 + rng.uniform(-1.3, 1.3))))
+        x += step
+    bounds = result.getbbox()
+    if bounds is None:
+        raise RenderError('EMPTY_TEXT', 'A text fragment contains no visible glyphs.')
+    return result.crop(bounds).rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+
+
+def english_layout(phrases, alpha, bbox, seed):
+    interior = alpha.filter(ImageFilter.MinFilter(17))
+    bh = bbox[3] - bbox[1]
+    for size in (22, 20, 18):
+        images = [handtext(text, size, seed) for text in phrases]
+        spacing = max(size * 2.5, bh * .10)
+        for fraction in (.44, .50, .38, .56):
+            first_y = int(bbox[1] + bh * fraction)
+            placements = []
+            for index, (phrase, im) in enumerate(zip(phrases, images)):
+                y = round(first_y + spacing * index)
+                if y + im.height > min(bbox[3] - 20, 780):
+                    break
+                choices = []
+                for x in range(max(18, bbox[0]), min(bbox[2] - im.width, 1182 - im.width) + 1, 6):
+                    region = interior.crop((x, y, x + im.width, y + im.height))
+                    if ImageChops.subtract(im.getchannel('A'), region).getextrema()[1] <= 20:
+                        choices.append(x)
+                if not choices:
+                    break
+                x = min(choices, key=lambda value: abs(value + im.width / 2 - (bbox[0] + bbox[2]) / 2))
+                placements.append((im, (x, y), {'text': phrase, 'position': [x, y], 'font_size': size, 'inside_silhouette': True}))
+            if len(placements) == len(phrases):
+                return placements
+    raise RenderError('ENGLISH_DOES_NOT_FIT', 'English fragments do not fit inside the silhouette at 18–22 px.', 'Use shorter English phrases or a photo with a wider torso. Do not alter the subject.')
+
+
+def japanese_block(text, size, seed, angle):
+    rows = [handtext(line, size, seed) for line in text.splitlines() if line.strip()]
+    width, height = max(im.width for im in rows), sum(im.height for im in rows) + 20 * (len(rows) - 1)
+    result = Image.new('RGBA', (width, height))
+    y = 0
+    for im in rows:
+        result.alpha_composite(im, ((width - im.width) // 2, y))
+        y += im.height + 20
+    return result.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
+
+
+def japanese_layout(texts, size, lower_pos, canonical, seed, variant=0):
+    lx, ly = lower_pos
+    left, right = lx, lx + canonical.width
+    margin, clearance = 40, 32
+    placements = []
+    fractions = ((.54, .76), (.68, .48), (.42, .66))[variant]
+    body = Image.new('L', CANVAS)
+    body.paste(canonical.getchannel('A'), lower_pos)
+    center = lx + canonical.width / 2
+    for index, text in enumerate(texts):
+        angle = 3 if index == 0 else -3
+        im = japanese_block(text, size, seed, angle)
+        cy = ly + canonical.height * fractions[index]
+        preferred_y = max(835, min(1560 - im.height, round(cy - im.height / 2)))
+        # Use the actual contour at this height, not the full-body bounding box.
+        # If one side is narrow, try a nearby head-level or above-head position.
+        ys = [preferred_y, round(ly + canonical.height * .12), round(ly - im.height - 24)]
+        ys += [preferred_y + offset for offset in (-80, 80, -160, 160)]
+        found = None
+        for y in dict.fromkeys(ys):
+            if y < 835 or y + im.height > 1560:
+                continue
+            occupied = body.crop((0, y - 16, CANVAS[0], y + im.height + 16)).getbbox()
+            if index == 0:
+                low = margin
+                high = occupied[0] - clearance if occupied else center + im.width / 2 - 24
+            else:
+                low = occupied[2] + clearance if occupied else center - im.width / 2 + 24
+                high = CANVAS[0] - margin
+            if high - low < im.width:
+                continue
+            x = round((low + high - im.width) / 2)
+            if (index == 0 and x + im.width / 2 >= center) or (index == 1 and x + im.width / 2 <= center):
+                continue
+            if any(not (x + im.width + 16 <= px or px + previous.width + 16 <= x or
+                        y + im.height + 16 <= py or py + previous.height + 16 <= y)
+                   for previous, (px, py), _ in placements):
+                continue
+            found = (x, y)
+            break
+        if found is None:
+            return None
+        x, y = found
+        placements.append((im, (x, y), {'text': text, 'position': [x, y], 'font_size': size, 'rotation': angle, 'outside_subject_alpha': True, 'side': 'left' if index == 0 else 'right'}))
+    return placements
+
+
+def protect(alpha, canonical, lower_pos, texts):
+    mask = Image.new('L', CANVAS)
+    mask.paste(alpha, (0, 0))
+    mask.paste(canonical.getchannel('A'), lower_pos)
+    draw = ImageDraw.Draw(mask)
+    for im, (x, y), _ in texts:
+        draw.rectangle((x - 8, y - 8, x + im.width + 8, y + im.height + 8), fill=255)
+    return mask
+
+
+def choose_layout(config, alpha, canonical, bbox, anchor, english, report):
+    connector.load_python_image_backend()
+    try:
+        templates = connector.load_templates(TEMPLATES)
+    except (OSError, TypeError, KeyError, AttributeError, ValueError) as exc:
+        raise RenderError('ASSET_INVALID', f'The connector template library cannot be parsed: {exc}', 'Restore assets/connectors/templates.json from the original package.') from exc
+    attempts = []
+    # At most 5 horizontal placements, 4 shared Japanese sizes and 3 text patterns.
+    # Source and canonical subject are never resized again.
+    offsets = (0, -120, 120, -240, 240)
+    positions = [(bbox[0] + dx, bbox[1] + PANEL[1]) for dx in offsets
+                 if 24 <= bbox[0] + dx and bbox[0] + dx + canonical.width <= CANVAS[0] - 24]
+    for size in (40, 36, 32, 28):
+        for lower in positions:
+            for variant in range(3):
+                japanese = japanese_layout(config['japanese'], size, lower, canonical, config['seed'], variant)
+                if japanese is None:
+                    continue
+                end = (anchor[0] + lower[0] - bbox[0], anchor[1] + PANEL[1])
+                protected = protect(alpha, canonical, lower, english + japanese)
+                try:
+                    candidate = connector.choose_safe_candidate(templates, anchor, end, CANVAS, 6.24, protected, config['seed'])
+                    attempts.append({'lower_position': list(lower), 'japanese_font_size': size, 'variant': variant, 'result': 'passed'})
+                    report['layout_attempts'] = attempts
+                    return lower, japanese, protected, end, candidate
+                except ValueError as exc:
+                    if not str(exc).startswith('NO_SAFE_CONNECTOR'):
+                        raise
+                    attempts.append({'lower_position': list(lower), 'japanese_font_size': size, 'variant': variant, 'result': 'no-safe-connector'})
+    report['layout_attempts'] = attempts
+    raise RenderError('NO_SAFE_LAYOUT', 'No bounded layout satisfied subject, lettering, border and connector protection.', 'Use shorter Japanese lines, choose a clear outer contour anchor, or choose a less crowded source photo. Changing random seeds is not a reliable fix.')
+
+
+def render(config, out, report):
+    work, outputs = out / 'work', out / 'outputs'
+    work.mkdir(parents=True, exist_ok=True)
+    outputs.mkdir(parents=True, exist_ok=True)
+    final = outputs / 'final.png'
+    # A failed retry must not expose an older result as a successful new result.
+    final.unlink(missing_ok=True)
+    for asset in (FONT, PAPER, TEMPLATES):
+        if not asset.is_file():
+            raise RenderError('ASSET_MISSING', str(asset), 'Restore the bundled original asset.')
+    report['assets'] = {str(asset.relative_to(ROOT)): sha256(asset) for asset in (FONT, PAPER, TEMPLATES)}
+    check_glyphs(config['english'] + config['japanese'])
+    report['glyph_coverage'] = 'passed'
+    try:
+        with Image.open(config['source']) as im:
+            source = ImageOps.exif_transpose(im).convert('RGB')
+    except OSError as exc:
+        raise RenderError('SOURCE_UNREADABLE', str(exc)) from exc
+    report['source'] = {'path': str(config['source']), 'sha256': sha256(config['source']), 'oriented_size': list(source.size)}
+    mask, segmentation = get_mask(config, source, work)
+    report['segmentation'] = segmentation
+    mask.save(work / 'source-mask.png')
+    photo, alpha, canonical, bbox, transform = prepare_subject(source, mask)
+    photo.save(work / 'upper-photo.png')
+    canonical.save(work / 'canonical-subject.png')
+    alpha.save(work / 'upper-alpha.png')
+    report['transform'] = transform
+    report['canonical'] = {'bbox': list(bbox), 'sha256': sha256(work / 'canonical-subject.png'), 'alpha_sha256': hashlib.sha256(canonical.getchannel('A').tobytes()).hexdigest(), 'created_once': True}
+    supplied = None
+    if 'anchor' in config:
+        supplied = (min(source.width - 1, config['anchor'][0] * source.width) * transform['uniform_scale'] - transform['crop_offset'][0], min(source.height - 1, config['anchor'][1] * source.height) * transform['uniform_scale'] - transform['crop_offset'][1])
+    anchor, anchor_record = choose_anchor(alpha, bbox, supplied)
+    if supplied is not None:
+        anchor_record['requested_source_normalized'] = config['anchor']
+        anchor_record['requested_panel_point'] = list(supplied)
+    english = english_layout(config['english'], alpha, bbox, config['seed'])
+    lower, japanese, protected, end, candidate = choose_layout(config, alpha, canonical, bbox, anchor, english, report)
+    report['anchor'] = {**anchor_record, 'upper': list(anchor), 'lower': list(end), 'source_normalized': [(anchor[0] + transform['crop_offset'][0]) / transform['uniform_scale'] / source.width, (anchor[1] + transform['crop_offset'][1]) / transform['uniform_scale'] / source.height]}
+    if 'theme' in config:
+        color = paper.parse_color(config['theme'])
+        color_source = 'brief'
+    else:
+        mean = ImageStat.Stat(source.resize((64, 64)).convert('RGB')).mean
+        color = tuple(round(.35 * c + .65 * 211) for c in mean)
+        color_source = 'muted-source-average'
+    theme = '#%02X%02X%02X' % color
+    paper.load_python_image_backend()
+    texture = paper.recolor(paper.cover_crop(Image.open(PAPER), *PANEL), color)
+    texture.save(work / 'paper.png')
+    canvas = Image.new('RGBA', CANVAS)
+    canvas.alpha_composite(photo, (0, 0))
+    canvas.paste(texture, (0, PANEL[1]))
+    glow = Image.new('RGBA', PANEL, '#FFF7E8')
+    glow.putalpha(alpha.filter(ImageFilter.GaussianBlur(10)).point(lambda p: round(p * .4)))
+    canvas.alpha_composite(glow, (0, 0))
+    cream = Image.new('RGBA', canonical.size, '#FFF9EC')
+    cream.putalpha(canonical.getchannel('A'))
+    cream.save(work / 'upper-subject.png')
+    canonical.save(work / 'lower-subject.png')
+    with Image.open(work / 'lower-subject.png') as saved_lower:
+        lower_rgb_verified = saved_lower.convert('RGB').tobytes() == canonical.convert('RGB').tobytes()
+        lower_rgba_verified = saved_lower.convert('RGBA').tobytes() == canonical.tobytes()
+    canvas.alpha_composite(cream, (bbox[0], bbox[1]))
+    canvas.alpha_composite(canonical, lower)
+    for im, pos, _ in english + japanese:
+        canvas.alpha_composite(im, pos)
+    protected.save(work / 'connector-protected.png')
+    stroke_alpha = connector.render_mask(candidate['points'], CANVAS, 6.24, 6, candidate['texture_seed'], .58)
+    collisions = connector.validate_rendered_mask(stroke_alpha, protected, anchor, end, candidate['contact_radius'])
+    if collisions:
+        raise RenderError('CONNECTOR_COLLISION', f'The complete rendered stroke overlaps {collisions} protected pixels.', 'Use another clear contour anchor or shorter copy.')
+    stroke = Image.new('RGBA', CANVAS, ACCENT)
+    stroke.putalpha(stroke_alpha)
+    stroke.save(work / 'connector.png')
+    canvas.alpha_composite(stroke)
+    canvas.convert('RGB').save(final)
+    canvas.resize((400, 533), Image.Resampling.LANCZOS).convert('RGB').save(work / 'preview.jpg', quality=94)
+    report.update({'status': 'success', 'canvas': list(CANVAS), 'split_y': 800, 'theme': theme, 'theme_source': color_source, 'accent': ACCENT, 'upper_position': [bbox[0], bbox[1]], 'lower_position': list(lower), 'lower_scale_ratio': 1.0, 'alpha_reused_exactly': cream.getchannel('A').tobytes() == canonical.getchannel('A').tobytes(), 'lower_rgb_matches_canonical': lower_rgb_verified, 'lower_layer_rgba_matches_canonical': lower_rgba_verified, 'text': [record for _, _, record in english + japanese], 'connector': {'template': candidate['template']['id'], 'mirrored': candidate['mirrored'], 'spread': candidate['spread'], 'stroke_width': 6.24, 'contact_radius': candidate['contact_radius'], 'texture_seed': candidate['texture_seed'], 'collision_pixels': collisions, 'protection': 'complete upper and lower subject alpha plus padded text rectangles'}, 'output': str(final), 'output_sha256': sha256(final), 'visual_review_required': ['Chosen subject and props included by segmentation', 'Identity, anatomy and expression of source retained', 'Anchor refers to the intended visible tip; automatic choice is not semantic finger detection', 'English meaning and Japanese fluency', 'Overall editorial balance and stylistic similarity']})
+    return final
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--out', type=Path, required=True)
+    args = parser.parse_args()
+    out = args.out.expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    report = {'status': 'failed', 'renderer': 'redthread-classic-simple', 'image_generation_used': False, 'runtime': {'python': platform.python_version(), 'pillow': PILLOW_VERSION}}
+    (out / 'outputs' / 'final.png').unlink(missing_ok=True)
+    (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    try:
+        config = read_config(args.config.expanduser().resolve())
+        report['seed'] = config['seed']
+        final = render(config, out, report)
+    except (RenderError, OSError, ValueError) as exc:
+        (out / 'outputs' / 'final.png').unlink(missing_ok=True)
+        report['error'] = {'code': getattr(exc, 'code', 'RENDER_FAILED'), 'message': getattr(exc, 'message', str(exc)), 'remedy': getattr(exc, 'remedy', 'Check the supplied images and brief.')}
+        (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+        print(str(exc), file=sys.stderr)
+        print(f'Report: {out / "report.json"}', file=sys.stderr)
+        return 2
+    (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(json.dumps({'status': 'success', 'output': str(final), 'report': str(out / 'report.json')}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

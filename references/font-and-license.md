@@ -1,21 +1,22 @@
-# DartsFont visual reference and license
+# DartsFont handling
 
-The original Redthread design used DartsFont. The model-based workflow preserves its informal handwriting character rather than rendering text with the font file.
+Use the bundled font at `assets/fonts/dartsfont/DartsFont-Regular.ttf` for every English and Japanese fragment.
 
-## Model direction
+## Required handling
 
-Ask Seedream 5.0 Pro for fine, slightly irregular handwritten English and Japanese, gentle baseline drift, restrained letter tilt, and loose spacing. Use a muted wine-red accent. Avoid conventional typesetting, heavy brush strokes, and ornate calligraphy.
+- Keep the TTF bundled when copying, installing, packaging, or distributing this Skill.
+- Treat a missing TTF as an incomplete Skill package; do not ask the user to download it again during normal use.
+- Pass the bundled asset path explicitly to the lettering renderer.
+- Check the font's Unicode cmap before rendering every phrase. Stop on a missing glyph rather than mixing fonts.
+- Preserve the bundled font data unchanged.
+- Preserve `assets/fonts/dartsfont/OFL.txt` with every redistributed copy. DartsFont v2.17 by DAICHI / ProjectDARTS is distributed under the SIL Open Font License 1.1. The authoritative source is `https://www.p-darts.jp/font/dartsfont/`.
+- Images created by the Skill do not need to include or expose the font file separately.
 
-An approved collage can be supplied as an optional reference for this lettering style. Do not use code to render a new font specimen or overlay text. Do not claim that the model loads the TTF, follows its cmap, or reproduces exact glyph outlines.
+## Lettering treatment
 
-Give the model the exact English and Japanese phrases. Check the generated characters visually. Correct malformed or missing characters with a targeted model edit; do not add a software-rendered text layer.
-
-## Bundled source and redistribution
-
-- Font asset: `assets/fonts/dartsfont/DartsFont-Regular.ttf`.
-- DartsFont v2.17 is by DAICHI / ProjectDARTS.
-- Authoritative source: <https://www.p-darts.jp/font/dartsfont/>.
-- The font is distributed under the SIL Open Font License 1.1. Preserve `assets/fonts/dartsfont/OFL.txt` with every redistributed font copy.
-- Keep the bundled font data unchanged. Preserve the font and its license when distributing this package as supplied.
-- The font is historical design provenance, not a runtime dependency of image generation. Do not run font installation or glyph-validation scripts for a normal collage request.
-- The generated image does not need to expose the font file separately.
+- Render text deterministically.
+- Add restrained per-glyph rotation, baseline drift, and tracking variation.
+- Keep English inside the upper silhouette.
+- Use one shared Japanese size.
+- Prefer two-line Japanese over reducing only one side.
+- Preserve clear glyph edges in the final single-pass render.

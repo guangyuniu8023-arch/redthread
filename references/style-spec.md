@@ -67,7 +67,7 @@ Use the same accent for all lettering and the connector.
 - Treat the assembled composition as the final image; do not create an approval proof followed by a separate filter pass.
 - Preserve the fixed paper's visible texture. Do not cover it with synthetic paper grain or replace it with a flat color.
 - Keep the real lower subject naturally integrated with the theme color without rebuilding the face or clothing.
-- Inspect both full resolution and a roughly 400 px thumbnail privately, then deliver one final PNG.
+- Make one sandbox invocation after inspecting the source. The renderer performs automatic checks and returns the final artifact plus a compact summary. If the host includes the final image in that same response, inspect it there. Do not make a separate preview or report-reading call. If no image is visible to the agent, deliver the generated PNG with automatic-check results and explicitly state that visual review was not performed.
 - Keep the subject cutout, masks, connector asset, component layers, and QA thumbnail internal. Do not preview, attach, link, or place them in the user-facing output directory unless the user explicitly asks for a specific intermediate.
 
 At thumbnail size, the person, two-panel structure, wine-red graphic system, Japanese side placement, and paper texture must remain immediately readable.

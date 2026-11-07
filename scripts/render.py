@@ -52,9 +52,18 @@ def normalized_point(value, field):
 
 def read_config(path):
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
+        if str(path) == '-':
+            text, base_dir = sys.stdin.read(), Path.cwd()
+        else:
+            path = Path(path).expanduser().resolve()
+            text, base_dir = path.read_text(encoding='utf-8'), path.parent
+        data = json.loads(text)
     except (OSError, ValueError) as exc:
-        raise RenderError('INVALID_CONFIG', str(exc), 'Provide a readable JSON brief.') from exc
+        raise RenderError('INVALID_CONFIG', str(exc), 'Provide a readable JSON brief, or pass a JSON object on stdin with --config -.') from exc
+    return validate_config(data, base_dir)
+
+
+def validate_config(data, base_dir):
     if not isinstance(data, dict):
         raise RenderError('INVALID_CONFIG', 'The brief must be a JSON object.')
     unknown = set(data) - {'source', 'mask', 'english', 'japanese', 'theme', 'seed', 'anchor', 'subject_point'}
@@ -76,7 +85,7 @@ def read_config(path):
             if not isinstance(data[name], str) or not data[name]:
                 raise RenderError('INVALID_CONFIG', f'{name} must be an image path.')
             p = Path(data[name]).expanduser()
-            data[name] = p.resolve() if p.is_absolute() else (path.parent / p).resolve()
+            data[name] = p.resolve() if p.is_absolute() else (base_dir / p).resolve()
     for name in ('anchor', 'subject_point'):
         if name in data:
             normalized_point(data[name], name)
@@ -432,17 +441,21 @@ def render(config, out, report):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--config', required=True, help='JSON brief path, or - to read JSON from stdin')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     out = args.out.expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
-    report = {'status': 'failed', 'renderer': 'redthread-classic-simple', 'image_generation_used': False, 'runtime': {'python': platform.python_version(), 'pillow': PILLOW_VERSION}}
+    report = {'status': 'failed', 'renderer': 'redthread-classic-simple', 'image_generation_used': False, 'runtime': {'python': platform.python_version(), 'pillow': PILLOW_VERSION}, 'visual_review': 'not_performed'}
     (out / 'outputs' / 'final.png').unlink(missing_ok=True)
     (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     try:
-        config = read_config(args.config.expanduser().resolve())
+        config = read_config(args.config)
         report['seed'] = config['seed']
+        brief_path = out / 'work' / 'brief.json'
+        brief_path.parent.mkdir(parents=True, exist_ok=True)
+        brief_path.write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
+        report['brief'] = str(brief_path)
         final = render(config, out, report)
     except (RenderError, OSError, ValueError) as exc:
         (out / 'outputs' / 'final.png').unlink(missing_ok=True)
@@ -450,9 +463,27 @@ def main():
         (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
         print(str(exc), file=sys.stderr)
         print(f'Report: {out / "report.json"}', file=sys.stderr)
+        print(json.dumps({'status': 'failed', 'report': str(out / 'report.json'), 'error': report['error'], 'visual_review': 'not_performed'}, ensure_ascii=False))
         return 2
     (out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps({'status': 'success', 'output': str(final), 'report': str(out / 'report.json')}, ensure_ascii=False))
+    print(json.dumps({
+        'status': 'success', 'output': str(final), 'report': str(out / 'report.json'),
+        'brief': report['brief'],
+        'checks': {
+            'glyph_coverage': report['glyph_coverage'],
+            'alpha_reused_exactly': report['alpha_reused_exactly'],
+            'lower_layer_rgba_matches_canonical': report['lower_layer_rgba_matches_canonical'],
+            'lower_scale_ratio': report['lower_scale_ratio'],
+            'connector_collision_pixels': report['connector']['collision_pixels'],
+        },
+        'artifact': {
+            'type': 'image', 'path': str(final), 'mime_type': 'image/png',
+            'width': report['canvas'][0], 'height': report['canvas'][1],
+            'sha256': report['output_sha256'],
+        },
+        'visual_review': 'not_performed',
+        'visual_review_required': report['visual_review_required'],
+    }, ensure_ascii=False))
     return 0
 
 

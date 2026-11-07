@@ -1,16 +1,22 @@
 ---
 name: redthread-classic-simple
-description: 将一张照片制作成 Redthread 双层拼贴。保留原版人物分割、同一人物像素复用、DartsFont 英日文字、固定纸纹和模板红线的代码渲染流程。通过一个 JSON 和一个命令生成最终 PNG。用于制作或修改此风格照片拼贴，尤其适合不需要编写合成代码的 Agent。无需生图模型。
+description: 用本地 Python/Pillow 将一张照片制作成 Redthread 双层拼贴。保留原版人物像素、DartsFont 英日文字、固定纸纹和模板红线。Agent 自动填写 JSON 并执行内置渲染脚本，最终只交付一张 PNG。禁止调用生图或图片编辑模型；执行失败也不切换到生图。
 ---
 
 # Redthread 原逻辑简化版
 
 使用现成渲染器。Agent 只需看图、填写简报、运行命令和检查成图。不要编写合成脚本、替换素材或调用生图模型。
 
+## 执行与交付边界
+
+- 唯一成图入口是本包的 `scripts/render.py`，通过命令执行工具运行。不要将任务转交给通用生图 skill、Seedream、imagegen 或其他生图/图片编辑模型，也不要用这些模型抠图、预览、润色或修复。
+- 缺少命令执行能力、可用 Python/Pillow，或无法分割且没有合法遮罩时，说明缺少的条件并停止。不得回退到生图模型，也不得把模型生成图当作脚本输出。
+- 看图、填写 JSON、分割、排版和检查都是内部步骤。正常任务连续执行，最后只交付一张最终 PNG；不要先交付计划、JSON、抠图或预览后等待用户确认。可以发送简短进度说明；必要输入缺失或执行失败时报告原因。
+
 ## 执行
 
 1. 查看原图。确定主体，写 3–4 条英文短语和 2 条日文短句。英文每条宜为 2–5 个词。日文可以用 `\n` 分行。若小指清晰可见，用 `anchor` 指向小指轮廓；否则可指定包角、衣角等清楚的轮廓尖端。没有明确锚点时可省略，但必须检查自动选点。
-2. 在任务目录创建 `brief.json`。路径相对这个 JSON 所在目录解析。完整字段与失败处理见 [输入说明](references/input.md)。
+2. 由 Agent 在任务目录填写并保存 `brief.json`，不要求用户手写 JSON。路径相对这个 JSON 所在目录解析。完整字段与失败处理见 [输入说明](references/input.md)。
 
 ```json
 {
@@ -20,7 +26,7 @@ description: 将一张照片制作成 Redthread 双层拼贴。保留原版人�
 }
 ```
 
-3. 使用宿主已有的 Python 3.10+ 和 Pillow 9.1+。下文 `python3` 代表这个解释器。在本 skill 目录运行：
+3. 使用宿主已有的 Python 3.10+ 和 Pillow 9.1+。下文 `python3` 代表这个解释器。由 Agent 在本 skill 目录执行下面的命令，不要只把命令返回给用户：
 
 ```bash
 python3 scripts/render.py --config /absolute/path/brief.json --out /absolute/path/result
@@ -28,7 +34,7 @@ python3 scripts/render.py --config /absolute/path/brief.json --out /absolute/pat
 
 macOS 14+ 可通过 Swift 和 Apple Vision 自动分割。其他系统在 JSON 中添加 `mask`，指向与原图等尺寸的白色前景、黑色背景灰度 PNG。已有遮罩时不必重新分割。
 
-4. 检查退出码和 `result/report.json`。成功后查看 `result/outputs/final.png` 的完整图和 `result/work/preview.jpg` 的 400 px 内部缩略图。确认人脸、手、包等道具完整；英文在上方剪影内；两侧日文清楚；红线两端接触同一轮廓点。满足后只交付最终 PNG。`work/` 是内部素材，不展示。
+4. 确认命令退出码为 0、`result/report.json` 的 `status` 为 `success`，且 `result/outputs/final.png` 实际存在。查看该最终图和 `result/work/preview.jpg` 的 400 px 内部缩略图。确认人脸、手、包等道具完整；英文在上方剪影内；两侧日文清楚；红线两端接触同一轮廓点。满足后只交付这张最终 PNG。`work/` 是内部素材，不展示。任一条件不满足时，说明本次未完成，不交付替代图片。
 
 ## 固定规则
 
